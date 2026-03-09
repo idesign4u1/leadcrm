@@ -21,6 +21,8 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="lead/[rowIndex]" options={{ headerShown: true, presentation: 'card' }} />
+      <Stack.Screen name="lead/new" options={{ headerShown: true, presentation: 'modal' }} />
     </Stack>
   );
 }

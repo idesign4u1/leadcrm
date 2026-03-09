@@ -1,0 +1,9 @@
+{
+  "name": "leadcrm",
+  "private": true,
+  "workspaces": ["packages/*", "mobile", "admin"],
+  "scripts": {
+    "mobile": "cd mobile && expo start",
+    "admin": "cd admin && next dev"
+  }
+}

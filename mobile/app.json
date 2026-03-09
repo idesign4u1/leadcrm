@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "LeadCRM",
+    "slug": "leadcrm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "leadcrm",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.leadcrm.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.leadcrm.app"
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

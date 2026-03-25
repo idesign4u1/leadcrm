@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import {
-  getSpreadsheetData,
-  getSpreadsheetHeaders,
-  appendRow,
-} from '@/lib/google-sheets/client'
-import type { Lead } from '@/types'
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,82 +9,47 @@ export async function GET(request: NextRequest) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('*, company:companies(*)')
+      .select('role, company_id')
       .eq('id', user.id)
       .single()
 
-    if (!profile) return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    const companyId = profile?.role === 'super_admin'
+      ? request.nextUrl.searchParams.get('company_id') || profile.company_id
+      : profile?.company_id
 
-    const companyId = profile.role === 'super_admin'
-      ? request.nextUrl.searchParams.get('company_id')
-      : profile.company_id
+    if (!companyId) return NextResponse.json({ data: [], total: 0 })
 
-    if (!companyId) return NextResponse.json({ data: [], headers: [] })
+    const search = request.nextUrl.searchParams.get('search') || ''
+    const status = request.nextUrl.searchParams.get('status') || ''
+    const repId = request.nextUrl.searchParams.get('rep_id') || ''
+    const page = parseInt(request.nextUrl.searchParams.get('page') || '1')
+    const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50')
+    const offset = (page - 1) * limit
 
-    const { data: sheetConn } = await supabase
-      .from('sheet_connections')
-      .select('*')
+    let query = supabase
+      .from('leads')
+      .select('*', { count: 'exact' })
       .eq('company_id', companyId)
-      .eq('is_active', true)
-      .single()
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
 
-    if (!sheetConn) return NextResponse.json({ data: [], headers: [], noSheet: true })
-
-    const [headers, rows] = await Promise.all([
-      getSpreadsheetHeaders(sheetConn.spreadsheet_id, sheetConn.sheet_name),
-      getSpreadsheetData(sheetConn.spreadsheet_id, sheetConn.sheet_name),
-    ])
-
-    const leads: Lead[] = rows.map((row, idx) => {
-      const lead: Lead = { _rowIndex: idx, _rowNumber: idx + 2 }
-      headers.forEach((header, colIdx) => {
-        lead[header] = row[colIdx] ?? ''
-      })
-      return lead
-    })
-
-    // Filter for sales reps - only assigned leads
-    const search = request.nextUrl.searchParams.get('search') ?? ''
-    const statusFilter = request.nextUrl.searchParams.get('status') ?? ''
-    const repFilter = request.nextUrl.searchParams.get('assigned_rep') ?? ''
-
-    let filtered = leads
-
-    if (profile.role === 'sales_rep' && sheetConn.assigned_rep_column) {
-      filtered = filtered.filter(l => l[sheetConn.assigned_rep_column!] === profile.full_name)
-    }
-
+    if (status) query = query.eq('status', status)
+    if (repId) query = query.eq('assigned_rep_id', repId)
     if (search) {
-      const q = search.toLowerCase()
-      filtered = filtered.filter(l =>
-        Object.values(l).some(v => String(v).toLowerCase().includes(q))
-      )
+      query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,campaign.ilike.%${search}%`)
     }
 
-    if (statusFilter && sheetConn.status_column) {
-      filtered = filtered.filter(l => l[sheetConn.status_column!] === statusFilter)
+    // Sales rep sees only their leads
+    if (profile?.role === 'sales_rep') {
+      query = query.eq('assigned_rep_id', user.id)
     }
 
-    if (repFilter && sheetConn.assigned_rep_column) {
-      filtered = filtered.filter(l => l[sheetConn.assigned_rep_column!] === repFilter)
-    }
+    const { data, error, count } = await query
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({
-      data: filtered,
-      headers,
-      total: leads.length,
-      sheetConnection: {
-        status_column: sheetConn.status_column,
-        name_column: sheetConn.name_column,
-        phone_column: sheetConn.phone_column,
-        email_column: sheetConn.email_column,
-        notes_column: sheetConn.notes_column,
-        assigned_rep_column: sheetConn.assigned_rep_column,
-      },
-    })
+    return NextResponse.json({ data, total: count ?? 0 })
   } catch (err) {
-    console.error('[leads GET]', err)
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
 
@@ -102,37 +61,31 @@ export async function POST(request: NextRequest) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('*')
+      .select('company_id, full_name')
       .eq('id', user.id)
       .single()
 
     const body = await request.json()
-    const { values } = body
+    const { name, phone, email, campaign, notes, status, assigned_rep_id, assigned_rep_name, custom_fields, date } = body
 
-    const { data: sheetConn } = await supabase
-      .from('sheet_connections')
-      .select('*')
-      .eq('company_id', profile.company_id)
-      .eq('is_active', true)
+    const { data, error } = await supabase
+      .from('leads')
+      .insert({
+        company_id: profile?.company_id,
+        name, phone, email, campaign, notes,
+        status: status || 'new',
+        assigned_rep_id,
+        assigned_rep_name,
+        custom_fields: custom_fields || {},
+        date: date || new Date().toISOString(),
+        source: 'manual',
+      })
+      .select()
       .single()
 
-    if (!sheetConn) return NextResponse.json({ error: 'No sheet connected' }, { status: 400 })
-
-    const rowNum = await appendRow(sheetConn.spreadsheet_id, sheetConn.sheet_name, values)
-
-    // Log activity
-    await supabase.from('activity_logs').insert({
-      company_id: profile.company_id,
-      user_id: user.id,
-      action: 'lead_created',
-      entity_type: 'lead',
-      entity_id: String(rowNum),
-      details: { values },
-    })
-
-    return NextResponse.json({ success: true, rowNumber: rowNum })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ data })
   } catch (err) {
-    console.error('[leads POST]', err)
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }

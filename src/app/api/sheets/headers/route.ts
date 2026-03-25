@@ -13,6 +13,24 @@ export async function GET(request: NextRequest) {
 
     if (!spreadsheetId) return NextResponse.json({ error: 'Missing spreadsheet_id' }, { status: 400 })
 
+    // Debug env vars
+    const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
+    const key = process.env.GOOGLE_PRIVATE_KEY
+
+    console.log('=== SHEETS DEBUG ===')
+    console.log('Email:', email)
+    console.log('Key exists:', !!key)
+    console.log('Key starts with:', key?.slice(0, 40))
+    console.log('Spreadsheet ID:', spreadsheetId)
+    console.log('Sheet Name:', sheetName)
+    console.log('===================')
+
+    if (!email || !key) {
+      return NextResponse.json({
+        error: `Missing env vars: ${!email ? 'GOOGLE_SERVICE_ACCOUNT_EMAIL ' : ''}${!key ? 'GOOGLE_PRIVATE_KEY' : ''}`
+      }, { status: 500 })
+    }
+
     const [headers, info] = await Promise.all([
       getSpreadsheetHeaders(spreadsheetId, sheetName),
       getSpreadsheetInfo(spreadsheetId),
@@ -26,7 +44,10 @@ export async function GET(request: NextRequest) {
       sheets,
     })
   } catch (err) {
-    console.error('[sheets headers]', err)
-    return NextResponse.json({ error: 'Failed to read sheet. Make sure the service account has access.' }, { status: 500 })
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[sheets/headers error]', message)
+    return NextResponse.json({
+      error: message
+    }, { status: 500 })
   }
 }

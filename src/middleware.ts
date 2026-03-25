@@ -2,13 +2,23 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 
 export async function middleware(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  // If env vars not set yet, show setup page
+  if (!supabaseUrl || !supabaseKey) {
+    const pathname = request.nextUrl.pathname
+    if (pathname === '/setup') return NextResponse.next()
+    return NextResponse.redirect(new URL('/setup', request.url))
+  }
+
   let response = NextResponse.next({
     request: { headers: request.headers },
   })
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         get(name: string) {

@@ -10,21 +10,50 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  let { data: profile } = await supabase
     .from('profiles')
     .select('*, company:companies(*)')
     .eq('id', user.id)
     .single()
 
-  // Profile not created yet — create it now
+  // If profile missing - create it inline (no redirect)
   if (!profile) {
-    await supabase.from('profiles').upsert({
-      id: user.id,
-      email: user.email ?? '',
-      full_name: user.user_metadata?.full_name ?? user.email ?? 'Admin',
-      role: 'super_admin',
-    })
-    redirect('/dashboard')
+    const { data: newProfile } = await supabase
+      .from('profiles')
+      .upsert({
+        id: user.id,
+        email: user.email ?? '',
+        full_name: user.user_metadata?.full_name ?? user.email ?? 'Admin',
+        role: 'super_admin',
+      })
+      .select('*, company:companies(*)')
+      .single()
+    profile = newProfile
+  }
+
+  // Still no profile after upsert - show error
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow p-8 max-w-md w-full text-center">
+          <p className="text-2xl mb-3">⚠️</p>
+          <h2 className="text-lg font-bold text-slate-800 mb-2">שגיאה בטעינת הפרופיל</h2>
+          <p className="text-sm text-slate-500 mb-4">הרץ את ה-SQL הבא ב-Supabase SQL Editor</p>
+          <pre className="bg-slate-50 text-xs text-left p-4 rounded-lg overflow-x-auto text-slate-700">
+{`INSERT INTO public.profiles (id, email, full_name, role)
+SELECT id, email,
+  COALESCE(raw_user_meta_data->>'full_name', email),
+  'super_admin'
+FROM auth.users
+WHERE email = '${user.email}'
+ON CONFLICT (id) DO UPDATE SET role = 'super_admin';`}
+          </pre>
+          <a href="/dashboard" className="mt-4 inline-block bg-blue-600 text-white text-sm px-5 py-2 rounded-lg hover:bg-blue-700">
+            רענן
+          </a>
+        </div>
+      </div>
+    )
   }
 
   const companyId = profile.company_id
@@ -42,19 +71,18 @@ export default async function DashboardPage() {
   ])
 
   const actionLabels: Record<string, string> = {
-    lead_created: '\u05d9\u05e6\u05e8 \u05dc\u05d9\u05d3 \u05d7\u05d3\u05e9',
-    lead_updated: '\u05e2\u05d3\u05db\u05df \u05dc\u05d9\u05d3',
-    status_changed: '\u05e9\u05d9\u05e0\u05d4 \u05e1\u05d8\u05d0\u05d8\u05d5\u05e1',
+    lead_created: 'יצר ליד חדש',
+    lead_updated: 'עדכן ליד',
+    status_changed: 'שינה סטאטוס',
   }
 
   const isSuperAdmin = profile.role === 'super_admin'
 
   return (
     <div className="flex flex-col min-h-full">
-      <Header profile={profile} title="\u05dc\u05d5\u05d7 \u05d1\u05e7\u05e8\u05d4" />
+      <Header profile={profile} title="לוח בקרה" />
 
       <div className="flex-1 p-6 space-y-6">
-        {/* Welcome */}
         <div>
           <h2 className="text-xl font-bold text-slate-800">שלום, {profile.full_name.split(' ')[0]} 👋</h2>
           <p className="text-slate-500 text-sm mt-0.5">
@@ -63,7 +91,6 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        {/* Super Admin - no company warning */}
         {isSuperAdmin && !companyId && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <span className="text-amber-500 text-lg">⚠️</span>
@@ -77,13 +104,12 @@ export default async function DashboardPage() {
           </div>
         )}
 
-        {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: '\u05e1\u05d4"\u05db \u05dc\u05d9\u05d3\u05d9\u05dd', value: '\u2014', icon: Users, color: 'blue', sub: '\u05de\u05d4\u05d2\u05d9\u05dc\u05d9\u05d5\u05df' },
-            { label: '\u05dc\u05d9\u05d3\u05d9\u05dd \u05d7\u05d3\u05e9\u05d9\u05dd \u05d4\u05d9\u05d5\u05dd', value: '\u2014', icon: TrendingUp, color: 'green', sub: '+0 \u05de\u05d0\u05ea\u05de\u05d5\u05dc' },
-            { label: '\u05e2\u05e1\u05e7\u05d0\u05d5\u05ea \u05e1\u05d2\u05d5\u05e8\u05d5\u05ea', value: '\u2014', icon: CheckCircle, color: 'purple', sub: '\u05e1\u05d4"\u05db' },
-            { label: '\u05d7\u05d1\u05e8\u05d9 \u05e6\u05d5\u05d5\u05ea', value: String(teamMembers?.length ?? 0), icon: PhoneCall, color: 'orange', sub: '\u05e4\u05e2\u05d9\u05dc\u05d9\u05dd' },
+            { label: 'סה"כ לידים', value: '—', icon: Users, color: 'blue', sub: 'מהגיליון' },
+            { label: 'לידים חדשים היום', value: '—', icon: TrendingUp, color: 'green', sub: '+0 מאתמול' },
+            { label: 'עסקאות סגורות', value: '—', icon: CheckCircle, color: 'purple', sub: 'סה"כ' },
+            { label: 'חברי צוות', value: String(teamMembers?.length ?? 0), icon: PhoneCall, color: 'orange', sub: 'פעילים' },
           ].map(({ label, value, icon: Icon, color, sub }) => (
             <Card key={label} className="relative overflow-hidden">
               <div className={`absolute top-0 left-0 w-1 h-full rounded-l-xl bg-${color}-500`} />
@@ -102,26 +128,22 @@ export default async function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Status Distribution */}
           <Card className="lg:col-span-2">
-            <CardHeader title="\u05d7\u05dc\u05d5\u05e7\u05ea \u05dc\u05d9\u05d3\u05d9\u05dd \u05dc\u05e4\u05d9 \u05e1\u05d8\u05d0\u05d8\u05d5\u05e1" subtitle="\u05de\u05ea\u05e2\u05d3\u05db\u05df \u05d1\u05d6\u05de\u05df \u05d0\u05de\u05ea" />
+            <CardHeader title="חלוקת לידים לפי סטאטוס" subtitle="מתעדכן בזמן אמת" />
             {statuses && statuses.length > 0 ? (
               <div className="space-y-3">
-                {statuses.map(s => (
+                {statuses.map((s: { id: string; color: string; label: string }) => (
                   <div key={s.id} className="flex items-center gap-3">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: s.color }} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
+                    <div className="flex-1">
+                      <div className="flex justify-between mb-1">
                         <span className="text-sm text-slate-700">{s.label}</span>
                         <span className="text-xs text-slate-400">—</span>
                       </div>
-                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className="h-full rounded-full" style={{ width: '0%', background: s.color }} />
-                      </div>
+                      <div className="h-1.5 bg-slate-100 rounded-full" />
                     </div>
                   </div>
                 ))}
-                <p className="text-xs text-slate-400 mt-2 text-center">חבר את גיליון ה-Google Sheets לצפייה בסטטיסטיקה חיה</p>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -131,9 +153,8 @@ export default async function DashboardPage() {
             )}
           </Card>
 
-          {/* Activity Feed */}
           <Card>
-            <CardHeader title="\u05e4\u05e2\u05d9\u05dc\u05d5\u05ea \u05d0\u05d7\u05e8\u05d5\u05e0\u05d4" />
+            <CardHeader title="פעילות אחרונה" />
             <div className="space-y-3">
               {recentActivity && recentActivity.length > 0 ? (
                 recentActivity.map((log: { id: string; action: string; created_at: string; profile?: { full_name: string } }) => (
@@ -141,9 +162,9 @@ export default async function DashboardPage() {
                     <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                       <div className="w-2 h-2 bg-blue-500 rounded-full" />
                     </div>
-                    <div className="min-w-0">
+                    <div>
                       <p className="text-sm text-slate-700">
-                        <span className="font-medium">{log.profile?.full_name ?? '\u05de\u05e9\u05ea\u05de\u05e9'}</span>{' '}
+                        <span className="font-medium">{log.profile?.full_name ?? 'משתמש'}</span>{' '}
                         {actionLabels[log.action] ?? log.action}
                       </p>
                       <p className="text-xs text-slate-400">{formatDateTime(log.created_at)}</p>
@@ -157,12 +178,11 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* Quick Links */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { href: '/leads', label: '\u05e2\u05d1\u05d5\u05e8 \u05dc\u05dc\u05d9\u05d3\u05d9\u05dd', desc: '\u05e6\u05e4\u05d9\u05d9\u05d4 \u05d5\u05e2\u05d3\u05db\u05d5\u05df \u05dc\u05d9\u05d3\u05d9\u05dd', color: 'bg-blue-50 text-blue-700 border-blue-100' },
-            { href: '/reports', label: '\u05d3\u05d5\u05d7\u05d5\u05ea \u05d5\u05e1\u05d8\u05d8\u05d9\u05e1\u05d8\u05d9\u05e7\u05d4', desc: '\u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05d5\u05de\u05d3\u05d3\u05d9\u05dd', color: 'bg-purple-50 text-purple-700 border-purple-100' },
-            { href: isSuperAdmin ? '/admin/companies' : '/settings', label: isSuperAdmin ? '\u05e0\u05d9\u05d4\u05d5\u05dc \u05d7\u05d1\u05e8\u05d5\u05ea' : '\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea \u05d7\u05d1\u05e8\u05d4', desc: isSuperAdmin ? '\u05e6\u05d5\u05e8 \u05d5\u05e0\u05d4\u05dc \u05d7\u05d1\u05e8\u05d5\u05ea' : '\u05d7\u05d9\u05d1\u05d5\u05e8 \u05d2\u05d9\u05dc\u05d9\u05d5\u05df \u05d5\u05e0\u05d9\u05d4\u05d5\u05dc \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea', color: 'bg-green-50 text-green-700 border-green-100' },
+            { href: '/leads', label: 'עבור ללידים', desc: 'צפייה ועדכון לידים', color: 'bg-blue-50 text-blue-700 border-blue-100' },
+            { href: '/reports', label: 'דוחות וסטטיסטיקה', desc: 'נתונים ומדדים', color: 'bg-purple-50 text-purple-700 border-purple-100' },
+            { href: isSuperAdmin ? '/admin/companies' : '/settings', label: isSuperAdmin ? 'ניהול חברות' : 'הגדרות', desc: isSuperAdmin ? 'צור ונהל חברות' : 'חיבור גיליון', color: 'bg-green-50 text-green-700 border-green-100' },
           ].map(({ href, label, desc, color }) => (
             <a key={href} href={href} className={`block p-4 rounded-xl border ${color} hover:shadow-sm transition-all`}>
               <div className="flex items-center justify-between">

@@ -69,9 +69,41 @@ export interface ActivityLog {
 }
 
 export interface Lead {
-  _rowIndex: number
-  _rowNumber: number
-  [key: string]: unknown
+  id: string
+  company_id: string
+  date?: string
+  name?: string
+  phone?: string
+  email?: string
+  campaign?: string
+  notes?: string
+  status: string
+  assigned_rep_id?: string
+  assigned_rep_name?: string
+  custom_fields: Record<string, unknown>
+  source?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CustomColumn {
+  id: string
+  company_id: string
+  key: string
+  label: string
+  field_type: 'text' | 'number' | 'date' | 'select'
+  sort_order: number
+  is_active: boolean
+  created_at: string
+}
+
+export interface WebhookToken {
+  id: string
+  company_id: string
+  token: string
+  label: string
+  is_active: boolean
+  created_at: string
 }
 
 export interface LeadFilters {

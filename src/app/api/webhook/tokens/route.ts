@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { randomBytes } from 'crypto'
+import crypto from 'crypto'
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,19 +10,16 @@ export async function GET(request: NextRequest) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id, role')
+      .select('company_id')
       .eq('id', user.id)
       .single()
 
-    if (!profile || !['company_admin', 'super_admin'].includes(profile.role)) {
-      return NextResponse.json({ error: 'Only admins can view webhook tokens' }, { status: 403 })
-    }
-
     const { data } = await supabase
       .from('webhook_tokens')
-      .select('id, company_id, name, is_active, last_used_at, created_at')
-      .eq('company_id', profile.company_id)
-      .order('created_at', { ascending: false })
+      .select('*')
+      .eq('company_id', profile?.company_id)
+      .eq('is_active', true)
+      .order('created_at')
 
     return NextResponse.json({ data: data ?? [] })
   } catch (err) {
@@ -38,34 +35,23 @@ export async function POST(request: NextRequest) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('company_id, role')
+      .select('company_id')
       .eq('id', user.id)
       .single()
 
-    if (!profile || !['company_admin', 'super_admin'].includes(profile.role)) {
-      return NextResponse.json({ error: 'Only admins can create webhook tokens' }, { status: 403 })
-    }
+    const body = await request.json().catch(() => ({}))
+    const label = body.label || 'Webhook Token'
 
-    const body = await request.json()
-    const { name } = body
-
-    // Generate a random token
-    const token = `wh_${randomBytes(24).toString('hex')}`
+    const token = crypto.randomBytes(32).toString('hex')
 
     const { data, error } = await supabase
       .from('webhook_tokens')
-      .insert({
-        company_id: profile.company_id,
-        token,
-        name: name || 'New Webhook',
-        is_active: true,
-      })
+      .insert({ company_id: profile?.company_id, token, label, is_active: true })
       .select()
       .single()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    return NextResponse.json({ data }, { status: 201 })
+    if (error) throw error
+    return NextResponse.json({ data })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

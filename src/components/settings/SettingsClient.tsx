@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import type { Profile, SheetConnection, StatusConfig } from '@/types'
+import { useState, useEffect } from 'react'
+import type { Profile, SheetConnection, StatusConfig, WebhookToken, CustomColumn } from '@/types'
 import { Card, CardHeader } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Modal from '@/components/ui/Modal'
 import Badge from '@/components/ui/Badge'
-import { Settings, Link, Users, CheckCircle, AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { Link, Users, CheckCircle, Plus, Trash2, Zap, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface Props {
@@ -21,14 +21,16 @@ interface Props {
 }
 
 export default function SettingsClient({ profile, sheetConnection, statuses, teamMembers }: Props) {
-  const [activeTab, setActiveTab] = useState<'sheet' | 'statuses' | 'team'>('sheet')
+  const [activeTab, setActiveTab] = useState<'sheet' | 'statuses' | 'team' | 'webhook' | 'columns'>('sheet')
   const canManage = ['company_admin', 'super_admin'].includes(profile.role)
 
   const tabs = [
-    { id: 'sheet', label: 'חיבור Google Sheets', icon: Link },
-    { id: 'statuses', label: 'סטאטוסים', icon: CheckCircle },
-    { id: 'team', label: 'צוות', icon: Users },
-  ] as const
+    { id: 'sheet' as const, label: 'חיבור Google Sheets', icon: Link },
+    { id: 'statuses' as const, label: 'סטאטוסים', icon: CheckCircle },
+    { id: 'team' as const, label: 'צוות', icon: Users },
+    { id: 'webhook' as const, label: 'Webhook', icon: Zap },
+    { id: 'columns' as const, label: 'עמודות מותאמות', icon: Copy },
+  ]
 
   return (
     <div className="flex-1 p-6 max-w-3xl">
@@ -58,6 +60,12 @@ export default function SettingsClient({ profile, sheetConnection, statuses, tea
       )}
       {activeTab === 'team' && (
         <TeamTab teamMembers={teamMembers} profile={profile} canManage={canManage} />
+      )}
+      {activeTab === 'webhook' && (
+        <WebhookTab canManage={canManage} />
+      )}
+      {activeTab === 'columns' && (
+        <ColumnsTab canManage={canManage} />
       )}
     </div>
   )
@@ -310,6 +318,241 @@ function TeamTab({
               </select>
             </div>
           </form>
+        </Modal>
+      )}
+    </Card>
+  )
+}
+
+// ---- Webhook Tab ----
+function WebhookTab({ canManage }: { canManage: boolean }) {
+  const [tokens, setTokens] = useState<Array<{ id: string; token: string; label: string; is_active: boolean; created_at: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newLabel, setNewLabel] = useState('Webhook')
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/webhook/tokens')
+      .then(r => r.json())
+      .then(d => setTokens(d.data ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleCreateToken() {
+    setCreating(true)
+    try {
+      const res = await fetch('/api/webhook/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: newLabel }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setTokens(ts => [data.data, ...ts])
+      toast.success('Webhook Token נוצר')
+      setShowCreateModal(false)
+      setNewLabel('Webhook')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'שגיאה')
+    } finally { setCreating(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Webhook Tokens"
+        subtitle="שמור את הטוקנים בצד ולהשתמש ב- URL לעיל לשליחת לידים"
+        action={canManage && (
+          <Button size="sm" onClick={() => setShowCreateModal(true)}>
+            <Plus size={14} /> יצור Token
+          </Button>
+        )}
+      />
+      <div className="space-y-3">
+        {loading ? (
+          <div className="text-center py-6 text-slate-400 text-sm">טוען...</div>
+        ) : tokens.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-sm">אין Webhook Tokens</div>
+        ) : (
+          tokens.map(token => (
+            <WebhookTokenItem key={token.id} token={token} />
+          ))
+        )}
+      </div>
+
+      {showCreateModal && canManage && (
+        <Modal open title="יצור Webhook Token" onClose={() => setShowCreateModal(false)} footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowCreateModal(false)}>בטל</Button>
+            <Button onClick={handleCreateToken} loading={creating}>צור</Button>
+          </>
+        }>
+          <div className="space-y-4">
+            <Input
+              label="תווית (שם)"
+              value={newLabel}
+              onChange={e => setNewLabel(e.target.value)}
+              placeholder="לדוגמה: Facebook Ads"
+            />
+            <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+              <p className="font-medium mb-1">JSON payload לשליחה:</p>
+              <pre className="bg-white p-2 rounded text-xs overflow-auto border border-blue-200">{JSON.stringify({
+                name: 'ראובן בן דוד',
+                phone: '+972501234567',
+                email: 'lead@example.com',
+                campaign: 'Facebook',
+                notes: 'פנה דרך המודעה',
+                status: 'new',
+                custom_fields: { field1: 'value1' }
+              }, null, 2)}</pre>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </Card>
+  )
+}
+
+function WebhookTokenItem({ token }: { token: any }) {
+  const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook/${token.token}`
+
+  return (
+    <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <p className="text-sm font-medium text-slate-800">{token.label}</p>
+          <p className="text-xs text-slate-400 mt-0.5">נוצר: {new Date(token.created_at).toLocaleDateString('he-IL')}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 mb-3">
+        <code className="flex-1 px-3 py-2 rounded-lg bg-white border border-slate-200 font-mono text-xs text-slate-600 overflow-auto">
+          {url}
+        </code>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(url)
+            toast.success('הועתק!')
+          }}
+          className="p-2 hover:bg-white rounded-lg text-slate-400 transition-colors"
+        >
+          <Copy size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---- Columns Tab ----
+function ColumnsTab({ canManage }: { canManage: boolean }) {
+  const [columns, setColumns] = useState<CustomColumn[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [newColumn, setNewColumn] = useState({ label: '', field_type: 'text' })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/columns')
+      .then(r => r.json())
+      .then(d => setColumns(d.data ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleCreateColumn() {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newColumn),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setColumns(cs => [data.data, ...cs])
+      toast.success('עמודה נוצרה')
+      setShowAddModal(false)
+      setNewColumn({ label: '', field_type: 'text' })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'שגיאה')
+    } finally { setSaving(false) }
+  }
+
+  async function handleDeleteColumn(id: string) {
+    if (!confirm('למחוק את העמודה?')) return
+    try {
+      const res = await fetch(`/api/columns/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error()
+      setColumns(cs => cs.filter(c => c.id !== id))
+      toast.success('עמודה נמחקה')
+    } catch { toast.error('שגיאה במחיקה') }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="עמודות מותאמות"
+        subtitle="הוסף עמודות נוספות ללידים"
+        action={canManage && (
+          <Button size="sm" onClick={() => setShowAddModal(true)}>
+            <Plus size={14} /> הוסף עמודה
+          </Button>
+        )}
+      />
+      <div className="space-y-2">
+        {loading ? (
+          <div className="text-center py-6 text-slate-400 text-sm">טוען...</div>
+        ) : columns.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-sm">אין עמודות מותאמות</div>
+        ) : (
+          columns.map(col => (
+            <div key={col.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div>
+                <p className="text-sm font-medium text-slate-800">{col.label}</p>
+                <p className="text-xs text-slate-400 mt-0.5">סוג: {col.field_type}</p>
+              </div>
+              {canManage && (
+                <button
+                  onClick={() => handleDeleteColumn(col.id)}
+                  className="p-2 hover:bg-white rounded-lg text-slate-400 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {showAddModal && canManage && (
+        <Modal open title="הוסף עמודה" onClose={() => setShowAddModal(false)} footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowAddModal(false)}>בטל</Button>
+            <Button onClick={handleCreateColumn} loading={saving}>צור</Button>
+          </>
+        }>
+          <div className="space-y-4">
+            <Input
+              label="שם העמודה"
+              value={newColumn.label}
+              onChange={e => setNewColumn(c => ({ ...c, label: e.target.value }))}
+              placeholder="לדוגמה: מוצר מעניין"
+            />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">סוג הנתון</label>
+              <select
+                value={newColumn.field_type}
+                onChange={e => setNewColumn(c => ({ ...c, field_type: e.target.value }))}
+                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="text">טקסט</option>
+                <option value="number">מספר</option>
+                <option value="date">תאריך</option>
+                <option value="select">בחירה</option>
+              </select>
+            </div>
+          </div>
         </Modal>
       )}
     </Card>

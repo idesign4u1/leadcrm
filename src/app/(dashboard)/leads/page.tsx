@@ -28,13 +28,6 @@ export default async function LeadsPage() {
     .eq('role', 'sales_rep')
     .eq('is_active', true)
 
-  const { data: sheetConn } = await supabase
-    .from('sheet_connections')
-    .select('*')
-    .eq('company_id', profile.company_id)
-    .eq('is_active', true)
-    .single()
-
   return (
     <div className="flex flex-col min-h-full">
       <Header profile={profile} title="ידיחת לידים" />
@@ -42,7 +35,6 @@ export default async function LeadsPage() {
         profile={profile}
         statuses={statuses ?? []}
         teamMembers={teamMembers ?? []}
-        sheetConnection={sheetConn ?? null}
       />
     </div>
   )

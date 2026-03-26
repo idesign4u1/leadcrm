@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { randomBytes } from 'crypto'
 
-export async function GET(request: NextRequest) {
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -15,22 +17,37 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (!profile || !['company_admin', 'super_admin'].includes(profile.role)) {
-      return NextResponse.json({ error: 'Only admins can view webhook tokens' }, { status: 403 })
+      return NextResponse.json({ error: 'Only admins can modify webhook tokens' }, { status: 403 })
     }
 
-    const { data } = await supabase
-      .from('webhook_tokens')
-      .select('id, company_id, name, is_active, last_used_at, created_at')
-      .eq('company_id', profile.company_id)
-      .order('created_at', { ascending: false })
+    const body = await request.json()
+    const { name, is_active } = body
 
-    return NextResponse.json({ data: data ?? [] })
+    const updates: Record<string, unknown> = {}
+    if (name !== undefined) updates.name = name
+    if (is_active !== undefined) updates.is_active = is_active
+
+    const { data, error } = await supabase
+      .from('webhook_tokens')
+      .update(updates)
+      .eq('id', params.id)
+      .eq('company_id', profile.company_id)
+      .select()
+      .single()
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (!data) return NextResponse.json({ error: 'Token not found' }, { status: 404 })
+
+    return NextResponse.json({ data })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -43,29 +60,18 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (!profile || !['company_admin', 'super_admin'].includes(profile.role)) {
-      return NextResponse.json({ error: 'Only admins can create webhook tokens' }, { status: 403 })
+      return NextResponse.json({ error: 'Only admins can delete webhook tokens' }, { status: 403 })
     }
 
-    const body = await request.json()
-    const { name } = body
-
-    // Generate a random token
-    const token = `wh_${randomBytes(24).toString('hex')}`
-
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('webhook_tokens')
-      .insert({
-        company_id: profile.company_id,
-        token,
-        name: name || 'New Webhook',
-        is_active: true,
-      })
-      .select()
-      .single()
+      .delete()
+      .eq('id', params.id)
+      .eq('company_id', profile.company_id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ data }, { status: 201 })
+    return NextResponse.json({ success: true })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

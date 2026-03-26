@@ -183,3 +183,82 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Leads table
+CREATE TABLE public.leads (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT,
+  campaign TEXT,
+  notes TEXT,
+  status TEXT DEFAULT 'new',
+  assigned_rep_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  assigned_rep_name TEXT,
+  source TEXT DEFAULT 'manual', -- 'manual', 'webhook', 'import', 'google_sheets'
+  custom_fields JSONB DEFAULT '{}',
+  date TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER leads_updated_at BEFORE UPDATE ON public.leads
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+ALTER TABLE public.leads ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "company_sees_leads" ON public.leads
+  FOR SELECT TO authenticated
+  USING (company_id = auth.user_company_id() OR auth.user_role() = 'super_admin');
+CREATE POLICY "company_manage_leads" ON public.leads
+  FOR ALL TO authenticated
+  USING (company_id = auth.user_company_id() AND auth.user_role() IN ('company_admin', 'super_admin'));
+CREATE POLICY "sales_rep_assigned_leads" ON public.leads
+  FOR SELECT TO authenticated
+  USING (company_id = auth.user_company_id() AND (assigned_rep_id = auth.uid() OR auth.user_role() IN ('company_admin', 'super_admin')));
+
+-- Webhook tokens table
+CREATE TABLE public.webhook_tokens (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  name TEXT,
+  is_active BOOLEAN DEFAULT true,
+  last_used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.webhook_tokens ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "company_manage_webhooks" ON public.webhook_tokens
+  FOR ALL TO authenticated
+  USING (company_id = auth.user_company_id() AND auth.user_role() IN ('company_admin', 'super_admin'));
+
+-- Custom columns table
+CREATE TABLE public.custom_columns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  field_type TEXT DEFAULT 'text', -- 'text', 'number', 'date', 'select', 'textarea'
+  options JSONB DEFAULT '[]',
+  sort_order INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(company_id, key)
+);
+
+CREATE TRIGGER custom_columns_updated_at BEFORE UPDATE ON public.custom_columns
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+ALTER TABLE public.custom_columns ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "company_sees_columns" ON public.custom_columns
+  FOR SELECT TO authenticated
+  USING (company_id = auth.user_company_id() OR auth.user_role() = 'super_admin');
+CREATE POLICY "admin_manage_columns" ON public.custom_columns
+  FOR ALL TO authenticated
+  USING (company_id = auth.user_company_id() AND auth.user_role() IN ('company_admin', 'super_admin'));

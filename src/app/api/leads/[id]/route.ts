@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { updateCell } from '@/lib/google-sheets/client'
 
 export async function PATCH(
   request: NextRequest,
@@ -12,7 +13,44 @@ export async function PATCH(
 
     const body = await request.json()
     const { id } = params
+    const { isRowNumber } = body
 
+    // If updating a Google Sheet row
+    if (isRowNumber) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single()
+
+      const { data: sheetConn } = await supabase
+        .from('sheet_connections')
+        .select('*')
+        .eq('company_id', profile?.company_id)
+        .eq('is_active', true)
+        .single()
+
+      if (!sheetConn) return NextResponse.json({ error: 'No sheet connected' }, { status: 400 })
+
+      const rowNumber = parseInt(id)
+      const updates = body.updates as Record<string, string>
+      for (const [col, val] of Object.entries(updates)) {
+        await updateCell(sheetConn.spreadsheet_id, sheetConn.sheet_name, rowNumber, col, val)
+      }
+
+      await supabase.from('activity_logs').insert({
+        company_id: profile?.company_id,
+        user_id: user.id,
+        action: 'lead_updated',
+        entity_type: 'lead',
+        entity_id: id,
+        details: { updates },
+      })
+
+      return NextResponse.json({ success: true })
+    }
+
+    // Otherwise update in Supabase
     const { data, error } = await supabase
       .from('leads')
       .update(body)

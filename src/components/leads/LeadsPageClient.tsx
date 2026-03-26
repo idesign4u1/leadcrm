@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { Profile, StatusConfig, SheetConnection, Lead } from '@/types'
-import { Search, Plus, RefreshCw, Phone, Mail, MessageSquare, ChevronDown, X, Filter } from 'lucide-react'
+import { Search, Plus, RefreshCw, Phone, Mail, MessageSquare, ChevronDown, X, Filter, Users } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
